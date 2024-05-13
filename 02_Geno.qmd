@@ -1,0 +1,698 @@
+---
+title: "Genotyping QC"
+format: html
+editor: visual
+jupyter: python3
+---
+
+## Quality Control of Genotyped Data
+
+```{r}
+setwd("/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/QC")
+library("readxl")
+library(data.table)
+library(xlsx)
+
+pops_sex_ped<-fread("/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/Pheno_Geno_Updated.txt")
+
+#For flowchart
+#Removed 258 participants due to sample call rate failure
+#Get mother/child distribution after
+
+Sample_Failure<-fread("Merged_Plates_sample_filtered_mind.mindrem.id")
+Check<-pops_sex_ped[!(pops_sex_ped$ID %in% Sample_Failure$IID),]
+Check<-dplyr::filter(Check, is.na(Check$no_geno_flag))
+
+#197 participants removed for low/high heterozygosity rate
+Het_Failure<-fread("Heterozygosity_ExcludeIDs.txt")
+Check2<-Check[!(Check$ID %in% Het_Failure$IID),]
+
+#10 participants removed as genetic duplicates
+Genetic_Dup<-fread("Duplicate_IDs_Exclude.txt")
+Check3<-Check2[!(Check2$ID %in% Genetic_Dup$V2),]
+
+pops_check1<-dplyr::filter(pops_sex_ped, is.na(no_geno_flag == 0))
+
+table(Check3$status)
+
+#96 unrelated participants removed
+Unrelated<-fread("Merged_biallelic_xsplit_filtered_2.fam")
+Check4<-Check3[(Check3$ID %in% Unrelated$V2),]
+table(Check4$status)
+
+#For GWAS, removed 154 participants that were related outside of mother/child pair (sibling mothers, etc.)
+Related_removed<-fread("Merged_biallelic_xsplit_filtered_3.fam")
+Check5<-Check4[(Check4$ID %in% Related_removed$V2),]
+table(Check5$status)
+
+#Removed 4 participants with ambiguous sex
+Sex_Exclude
+
+
+Check6<-Check5[!(Check5$ID %in% Sex_Exclude),]
+Status_check<-as.data.table(table(Check6$POPSID))
+Status_check_filter<-dplyr::filter(Status_check, N == 1)
+
+Solo<-Check5[(Check5$POPSID %in% Status_check_filter$V1),]
+
+Check_final <- spread(Check5, status, ID)
+table(Check5$m_ind,Check5$c_ind)
+
+
+#Creating the GWAS flag 
+pops_sex_ped$GWAS_Flag <- 1
+pops_sex_ped$GWAS_Flag[pops_sex_ped$no_geno_flag == 1] = 0
+pops_sex_ped$GWAS_Flag[(pops_sex_ped$ID %in% Sample_Failure$IID)] = 0
+pops_sex_ped$GWAS_Flag[(pops_sex_ped$ID %in% Het_Failure$IID)] = 0
+pops_sex_ped$GWAS_Flag[(pops_sex_ped$ID %in% Genetic_Dup$V2)] = 0
+pops_sex_ped$GWAS_Flag[!(pops_sex_ped$ID %in% Unrelated$V2)] = 0
+pops_sex_ped$GWAS_Flag[!(pops_sex_ped$ID %in% Related_removed$V2)] = 0
+pops_sex_ped$GWAS_Flag[(pops_sex_ped$ID %in% Sex_Exclude)] = 0
+
+table(pops_sex_ped$GWAS_Flag, exclude = F)
+
+pops_sex_ped$Sample_Failure_Flag[(pops_sex_ped$ID %in% Sample_Failure$IID)] = 1
+
+pops_sex_ped$Het_Flag[(pops_sex_ped$ID %in% Het_Failure$IID)] = 1
+pops_sex_ped$Dup_Flag[(pops_sex_ped$ID %in% Genetic_Dup$V2)] = 1
+
+pops_sex_ped$Unrelated_Flag[!(pops_sex_ped$ID %in% Unrelated$V2) & is.na(pops_sex_ped$Sample_Failure_Flag) & is.na(pops_sex_ped$Het_Flag) & is.na(pops_sex_ped$Dup_Flag) & is.na(pops_sex_ped$no_geno_flag)] = 1
+
+pops_sex_ped$Related2_Flag[!(pops_sex_ped$ID %in% Related_removed$V2)  & is.na(pops_sex_ped$Sample_Failure_Flag) & is.na(pops_sex_ped$Het_Flag) & is.na(pops_sex_ped$Dup_Flag) & is.na(pops_sex_ped$no_geno_flag) & is.na(pops_sex_ped$Unrelated_Flag)] = 1
+
+pops_sex_ped$Sex_Flag[(pops_sex_ped$ID %in% Sex_Exclude)  & is.na(pops_sex_ped$Sample_Failure_Flag) & is.na(pops_sex_ped$Het_Flag) & is.na(pops_sex_ped$Dup_Flag) & is.na(pops_sex_ped$no_geno_flag) & is.na(pops_sex_ped$Unrelated_Flag) & is.na(pops_sex_ped$Related2_Flag)] = 1
+
+
+#Adding in new sex information, only for those used in the GWAS downstream - 
+
+Sex_Impute
+
+pops_sex_ped$SexImpute_Flag[(pops_sex_ped$ID %in% Sex_Impute)] = 1
+
+pops_sex_ped$sex_update<-ifelse(pops_sex_ped$ID %in% XX, 0, pops_sex_ped$pn_female )
+
+pops_sex_ped$sex_update<-ifelse(pops_sex_ped$ID %in% XX, 1, pops_sex_ped$sex_update )
+
+
+#Export for future use
+fwrite(pops_sex_ped, "/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/Pheno_Geno_UpdatedFlags.txt", sep="\t" )
+
+#Separate IIDs for mother and child
+pops_mom<-dplyr::filter(Check6, status == "mother")[,c("POPSID","ID")]
+pops_child<-dplyr::filter(Check6, status == "child")[,c("POPSID","ID")]
+
+names(pops_mom)<-NULL
+names(pops_child)<-NULL
+
+fwrite(pops_mom, "/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/Final_Mom_ID.txt", sep="\t" )
+
+fwrite(pops_child, "/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/Final_Child_ID.txt", sep="\t" )
+
+
+##Check
+popflags<-fread("/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/Pheno_Geno_UpdatedFlags.txt")
+
+#In the 7329 set, there are 12 cases of sex discordance
+
+#Okay, check sex again...refer to the first part of the sex distribution section below
+newflag<-merge(popflags,sex_check,by.x='ID', by.y='IID',all = T)
+
+#Recreate the pops flag table due to errors in sex
+fwrite(newflag, "/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/Pheno_Geno_UpdatedFlags.txt", sep="\t")
+
+
+check<-dplyr::filter(newflag, Related2_Flag==1 | GWAS_Flag==1)
+check<-dplyr::filter(newflag, is.na(no_geno_flag) & is.na(Sample_Failure_Flag) & is.na(Het_Flag) & is.na(Dup_Flag) & is.na(Unrelated_Flag))
+
+
+##Subset to IDs for filter in PLINK,
+check<-as.data.frame(check[,c(1:3,8,13,18,19,20,23)])
+check$Related_Flag<-ifelse(is.na(check$Related2_Flag), 0, check$Related2_Flag)
+
+check<-check[,-c(6,7,8)]
+
+
+fwrite(check,"/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/POPsRelated_IDs.txt", sep="\t" )
+
+check<-check[,c("POPSID","ID","SNPSEX")]
+names(check) <- NULL
+
+fwrite(check,"/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/POPsRelated_IDs_PLINK.txt", sep="\t" )
+
+```
+
+""
+
+### Sex Check: Distributions
+
+Note that this step comes after removing unrelated, duplicates, heterozygosity rate violations, and sample call rate missingness filters.
+
+```{r}
+
+sex_check<-fread("sex_f_distribution_part2.sexcheck")
+hist(sex_check$F)
+
+sex_review<-dplyr::filter(sex_check, STATUS == "PROBLEM")
+sex_check_table<-check[check$ID %in% sex_review$IID]
+
+sex_check<-sex_check[,c("FID","IID",'SNPSEX')]
+
+pops_checking<-as.data.table(pops_sex_ped)
+
+sex_check_table<-pops_checking[pops_checking$ID %in% sex_review$IID]
+
+sex_QC<-merge(sex_review,sex_check_table, by.x="IID",by.y="ID")
+
+sex_QC_child<-dplyr::filter(sex_QC,status=="child")
+
+sex_check_full<-merge(sex_review,Link,by.x="IID",by.y="ID",all.x=T)
+```
+
+### Kinship QC
+
+```{r}
+kinship<-read_excel("Pheno_Geno_Linkage_2.xlsx",sheet = "Kinship_0") 
+
+kinship_between<-fread("/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/QC/POPs_Rel.kin0")
+
+kinship1<-merge(kinship_between,pops_sex_ped,by.x="ID1",by.y="ID",all.x=T)
+kinship2<-merge(kinship1,pops_sex_ped,by.x="ID2",by.y="ID",all.x=T)
+
+write.xlsx(kinship2,"/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/QC/POPs_Rel_kinship_between.xlsx")
+
+kinship_error<-read_excel("Pheno_Geno_Linkage_2.xlsx",sheet = "Kinship") 
+kinship_error<-dplyr::filter(kinship_error, Error == 1)
+
+kinship_error1<-merge(kinship_error,pops_sex_ped,by.x="ID1",by.y="ID",all.x=T)
+kinship_error2<-merge(kinship_error1,pops_sex_ped,by.x="ID2",by.y="ID",all.x=T)
+```
+
+### Heterozygosity QC
+
+```{r}
+Het<-fread("/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/QC/sample_filtered_mind_geno_het.het")
+
+summary(Het$F)
+sd(Het$F)
+
+#So the standard deviation is 0.02184342
+#Including a cutpoint of 3 standard deviations to exclude problematic samples
+
+Upper_cut<-0.009014+(3*0.02184342) #0.07454426
+Lower_cut<-0.009014-(3*0.02184342) #--0.05651626
+
+Het$Flag_Het<-ifelse(Het$F>=Upper_cut | Het$F<=Lower_cut,1,0)
+
+table(Het$Flag)
+#   0    1 
+#7435  197
+
+Het_check<-dplyr::filter(Het, Flag_Het == 1)
+
+hist(Het$F, breaks = 100)
+
+Het_check<-Het_check[,1:2]
+fwrite(Het_check,"/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/QC/Heterozygosity_ExcludeIDs.txt",sep="\t")
+```
+
+### Calculating Principal Components
+
+```{r}
+#RUNNING JOBS INTERACTIVELY
+
+#sintr -A GSMITH-SL2-CPU -p icelake -N2 -n64 -t 5:0:0 
+#module load R for more up to date R in HPC - but issues with adding packages
+
+#/home/jam248/miniconda3/envs/R/bin/R
+#/home/jam248/miniconda3/bin/R
+
+
+x<-c("data.table", "dplyr", "plyr", "VennDiagram", "ggplot2", "sjPlot", "stargazer", "gtsummary", "tableone",
+"devtools", "SNPRelate", "stringr", "Matrix", "GENESIS", "GWASTools", "ramwas")
+
+lapply(x, require, character.only = TRUE)
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install("GENESIS")
+library(GENESIS)
+
+BiocManager::install("SNPRelate")
+
+setDTthreads(64)
+
+## Code below focuses only on All, but also performed for GBR only group
+
+setwd("/home/jam248/rds/hpc-work/POPs/GWAS/Input/")
+
+mom_nope<-fread("Final_Mom_ID_noPE.txt")
+mom_nope_gbr<-fread("Final_Mom_ID_GBR_noPE.txt")
+
+mom_pe_gbr<-fread("Final_Mom_ID_GBR.txt")
+mom_pe<-fread("Final_Mom_ID.txt")
+
+child_nope<-fread("Final_Child_ID_noPE.txt")
+child_nope_gbr<-fread("Final_Child_ID_GBR_noPE.txt")
+
+child_pe<-fread("Final_Child_ID.txt")
+child_pe_gbr<-fread("Final_Child_ID_noPE.txt")
+
+#2. Subset genotype files to aforementioned IDs - these files are needed for TrajGWAS (?)
+
+runPLINK<- function(PLINKoptions = "") system(paste("/home/jam248/miniconda3/bin/plink2", PLINKoptions))
+
+runPLINK("--pfile /home/jam248/rds/rds-obsgynae-pops-DC0Q0rbedlk/POPs_Hardcalls/POPs_Final --max-alleles 2 --keep /home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/Final_Mom_ID_noPE.txt --make-bed --out /home/jam248/Mom_noPE")
+
+runPLINK("--pfile /home/jam248/rds/rds-obsgynae-pops-DC0Q0rbedlk/POPs_Hardcalls/POPs_Final --max-alleles 2 --keep /home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/Final_Child_ID_noPE.txt --make-bed --out /home/jam248/Child_noPE")
+
+setwd("/home/jam248/rds/rds-obsgynae-pops-DC0Q0rbedlk/POPs_Hardcalls/")
+
+snpgdsBED2GDS(bed.fn = "Mom_noPE.bed", 
+              bim.fn = "Mom_noPE.bim", 
+              fam.fn = "Mom_noPE.fam", 
+              cvt.chr = "char",
+              out.gdsfn = "Mom_noPE.gds")
+
+snpgdsBED2GDS(bed.fn = "Child_noPE.bed", 
+              bim.fn = "Child_noPE.bim", 
+              fam.fn = "Child_noPE.fam", 
+              cvt.chr = "char",
+              out.gdsfn = "Child_noPE.gds")
+
+#snpgdsBED2GDS(bed.fn = "/home/jam248/rds/hpc-work/POPs/Genotype_Data/POPs_Final2.bed", bim.fn = "/home/jam248/rds/hpc-work/POPs/Genotype_Data/POPs_Final2.bim", fam.fn = "/home/jam248/rds/hpc-work/POPs/Genotype_Data/POPs_Final2.fam", cvt.chr = "char",out.gdsfn = "/home/jam248/rds/hpc-work/POPs/Genotype_Data/POPs_Final2.gds")
+
+#gds_POP_f<-snpgdsOpen("/home/jam248/rds/hpc-work/POPs/Genotype_Data/POPs_Final2.gds")
+
+#SNPs are kept if MAF>5%, nonmonomorphic, call rate (95%) , limiting to autosomal SNPs, LD calculated by correlation coefficient
+#Sliding window of bp: 500,000
+
+#Why do we limit to common variants for PCA? Because it is shown that PCA performance is worse with inclusion of rare variants
+#snpset_POP <- snpgdsLDpruning(gds_POP_f, method="corr", slide.max.bp=50e5,ld.threshold=sqrt(0.1), verbose=FALSE, maf=.05,missing.rate=.05)
+
+#Checkpoint: Saved the snpset file--can load in here:
+#save(snpset_POP, file="/home/jam248/rds/hpc-work/POPs/Genotype_Data/PC_Comp/LDPruned_SNPs_f.RData")
+
+load("/home/jam248/rds/hpc-work/POPs/Genotype_Data/PC_Comp/LDPruned_SNPs_f.RData")  #Dataset called pruned, set of same SNPs used for PCA: 80,396
+pruned <- unlist(snpset_POP, use.names=FALSE)
+#length(pruned)  
+
+#Pairwise Measures of Ancestry Divergence
+
+setwd("/home/jam248/rds/hpc-work/POPs/Genotype_Data/Kinship/")
+#Used KING software to compute, then used to calculate PCs in PCAir
+#NOTE - there are slight differences in PCs 
+#king -b POPs_Final2.bed --kinship
+#king -b Mom.bed --kinship --prefix Mom
+
+KINGmat1 <- kingToMatrix(c("POPs_rel_Full.kin0","POPs_rel_Full.kin"),estimator = "Kinship")
+
+KINGmat<-snpgdsIBDKING(gds_POP_f,num.thread=90)
+showfile.gds(closeall=TRUE)
+KINGmat<-kingToMatrix(KINGmat)
+
+#POPs_rel.kin0
+#POPs_rel_Child.kin0
+#POPs_rel_Child_noPE.kin0
+#POPs_rel_Mom.kin0
+#POPs_rel_Mom_noPE.kin0
+
+#Child_GBR.kin0
+#Child_GBR_noPE.kin0
+#Mom_GBR.kin0
+#Mom_GBR_noPE.kin0
+
+KINGmat_child1 <- kingToMatrix("Child.kin0",estimator = "Kinship")
+
+POPs_geno <- GdsGenotypeReader(filename = "/home/jam248/rds/hpc-work/POPs/Genotype_Data/POPs_Final2.gds")
+
+setwd("/home/jam248/rds/hpc-work/POPs/Genotype_Data/PC_Comp")
+
+POPs_geno<- GdsGenotypeReader(filename = "Child_noPE_Hardcall.gds")
+#"Child_GBR_noPE.gds","Mom_GBR.gds","Mom_GBR_noPE.gds")
+
+POPs_genoData <- GenotypeData(POPs_geno)
+
+mypcair <- GENESIS::pcair(POPs_genoData,kinobj = KINGmat, divobj = KINGmat, snp.include = pruned)
+
+
+PCs<-as.data.frame(mypcair$vectors)
+
+
+PCs <- cbind(rownames(PCs),PCs)
+rownames(PCs) <- NULL
+colnames(PCs) <- c(names(PCs)) #to not write all the column names
+colnames(PCs)[1] <- "IID" 
+names(PCs)
+
+fwrite(PCs, "/home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/PCs_All_7171.txt",sep="\t")
+
+#PCs_Fetal_3484.txt"
+#PCs_Fetal_noPE_3258.txt"
+#PCs_Maternal_3685.txt"
+#PCs_Maternal_noPE_3450.txt"
+#PCs_Fetal_GBR_2996.txt"
+#PCs_Fetal_noPE_GBR_2791.txt"
+#PCs_Maternal_GBR_3177.txt"
+#PCs_Maternal_noPE_GBR_2968.txt"
+
+png("/home/jam248/rds/hpc-work/POPs/Genotype_Data/PC_Comp/PCs_Maternal_noPE_GBR.png")
+ggplot(data = PCs, aes(x = V1, y = V2)) +
+  geom_point() +
+  labs(title = "PCA Plot",
+       x = "Principal Component 1",
+       y = "Principal Component 2")
+dev.off()
+
+##After PCA, merge PCs with covariates
+#Need to make four covariate files for the data types
+
+Mom_Covar<-fread("/home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/COVAR_PLINK_mom.txt")
+Child_Covar<-fread("/home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/COVAR_PLINK_child.txt")
+
+mom_nopePCs<-fread("/home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/PCs_Maternal_noPE_GBR_2968.txt")
+child_nopePCs<-fread("/home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/PCs_Fetal_noPE_GBR_2791.txt")
+mom_pePCs<-fread("/home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/PCs_Maternal_GBR_3177.txt")
+child_pePCs<-fread("/home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/PCs_Fetal_GBR_2996.txt")
+
+Mom_Covar<-Mom_Covar[,-c("V1","V2","V3","V4","V5","V6","V7","V8","V9","V10")]
+Mom_Covar_Full<-merge(Mom_Covar,mom_pePCs,by="IID")
+#fwrite(Mom_Covar_Full,"/home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/COVAR_PLINK_mom_Full.txt",sep="\t")
+
+Mom_Covar_Full <-data.table::setcolorder(Mom_Covar_Full,c(2,1))
+fwrite(Mom_Covar_Full,"/home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/COVAR_PLINK_mom_GBR.txt",sep="\t")
+
+#Limit to only those who identify as White
+Mom_Covar_Full<-fread("/home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/COVAR_PLINK_mom_GBR.txt")
+Mom_Covar_Full<-dplyr::filter(Mom_Covar_Full,mat_race_ethnicity== "WHITE")
+fwrite(Mom_Covar_Full,"/home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/COVAR_PLINK_mom_GBR.txt",sep="\t")
+
+Mom_Covar_noPE<-merge(Mom_Covar,mom_nopePCs,by="IID",all.y=T)
+#fwrite(Mom_Covar_noPE,"/home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/COVAR_PLINK_mom_noPE.txt",sep="\t")
+
+Mom_Covar_noPE <-data.table::setcolorder(Mom_Covar_noPE,c(2,1))
+fwrite(Mom_Covar_noPE,"/home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/COVAR_PLINK_mom_GBR_noPE.txt",sep="\t")
+
+Mom_Covar_noPE<-fread("/home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/COVAR_PLINK_mom_GBR_noPE.txt")
+Mom_Covar_noPE<-dplyr::filter(Mom_Covar_noPE,mat_race_ethnicity== "WHITE")
+fwrite(Mom_Covar_noPE,"/home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/COVAR_PLINK_mom_GBR_noPE.txt",sep="\t")
+
+Child_Covar<-Child_Covar[,-c("V1","V2","V3","V4","V5","V6","V7","V8","V9","V10")]
+Child_Covar_Full<-merge(Child_Covar,child_pePCs,by="IID")
+#fwrite(Child_Covar_Full,"/home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/COVAR_PLINK_child_Full.txt",sep="\t")
+
+Child_Covar_Full <-data.table::setcolorder(Child_Covar_Full,c(2,1))
+fwrite(Child_Covar_Full,"/home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/COVAR_PLINK_child_GBR.txt",sep="\t")
+
+Child_Covar_Full<-fread("/home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/COVAR_PLINK_child_GBR.txt")
+Child_Covar_Full<-dplyr::filter(Child_Covar_Full,mat_race_ethnicity== "WHITE")
+fwrite(Child_Covar_Full,"/home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/COVAR_PLINK_child_GBR.txt",sep="\t")
+
+Child_Covar_noPE<-merge(Child_Covar,child_nopePCs,by="IID",all.y=T)
+#fwrite(Child_Covar_noPE,"/home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/COVAR_PLINK_child_noPE.txt",sep="\t")
+
+Child_Covar_noPE<-data.table::setcolorder(Child_Covar_noPE,c(2,1))
+fwrite(Child_Covar_noPE,"/home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/COVAR_PLINK_child_GBR_noPE.txt",sep="\t")
+
+Child_Covar_noPE<-fread("/home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/COVAR_PLINK_child_GBR_noPE.txt")
+Child_Covar_noPE<-dplyr::filter(Child_Covar_noPE,mat_race_ethnicity== "WHITE")
+fwrite(Child_Covar_noPE,"/home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/COVAR_PLINK_child_GBR_noPE.txt",sep="\t")
+
+#Mom_pheno<-fread("/home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/PHENO_PLINK_mom.txt")
+#Child_pheno<-fread("/home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/PHENO_PLINK_child.txt")
+
+Mom_Covar_Full<-fread("/home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/COVAR_PLINK_mom_Full.txt")
+
+Mom_Covar_Full <-data.table::setcolorder(Mom_Covar_Full,c(2,1))
+fwrite(Mom_Covar_Full,"/home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/COVAR_PLINK_mom_Full.txt",sep="\t")
+
+
+Mom_Covar_noPE<-fread("/home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/COVAR_PLINK_mom_noPE.txt")
+Mom_Covar_noPE <- data.table::setcolorder(Mom_Covar_noPE,c(2,1))
+fwrite(Mom_Covar_noPE,"/home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/COVAR_PLINK_mom_noPE.txt",sep="\t")
+
+
+Child_Covar_Full<-fread("/home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/COVAR_PLINK_child_Full.txt")
+Child_Covar_Full <- data.table::setcolorder(Child_Covar_Full,c(2,1))
+fwrite(Child_Covar_Full,"/home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/COVAR_PLINK_child_Full.txt",sep="\t")
+
+Child_Covar_noPE<-fread("/home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/COVAR_PLINK_child_noPE.txt")
+Child_Covar_noPE <- data.table::setcolorder(Child_Covar_noPE,c(2,1))
+fwrite(Child_Covar_noPE,"/home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/COVAR_PLINK_child_noPE.txt",sep="\t")
+
+```
+
+### Genetic Ancestry QC
+
+```{r}
+
+#1000 Genomes 
+fam_1G<-fread("/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/QC/all_phase3.psam")
+
+fam_1G$FID<-0
+
+POPs_ethn<-fread("/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/QC/POPs_ethnicity.txt")
+
+POPs_ethn<-dplyr::rename(POPs_ethn, FID=POPSID, `#IID`=ID)
+
+PCs<-fread("/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/QC/POP_1G_merged.eigenvec")
+
+PCs<-dplyr::rename(PCs, FID=V1, `#IID`=V2)
+
+PCs_1<-merge(PCs,fam_1G,by="#IID",all=T)
+PCs_2<-merge(PCs_1,POPs_ethn,by="#IID",all= T)
+PCs_3<-PCs_2[!(is.na(PCs_2$V3))]
+
+fam_1G_2<-fam_1G[,c("FID","#IID","SuperPop")]
+fam_1G_2<-dplyr::rename(fam_1G_2, )
+fwrite(fam_1G_2, "/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/QC/1000G_ID2Pop.txt",sep="\t")
+
+fam_1G_3<-fam_1G[,c("FID","#IID","Population")]
+fam_1G_3<-dplyr::rename(fam_1G_3, )
+colnames(fam_1G_3)<-c("FID","IID","Pop")
+fwrite(fam_1G_3, "/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/QC/1000G_ID2Pop_Granular.txt",sep="\t")
+
+#AFR AMR EAS EUR SAS 
+#661 347 504 503 489 
+
+library(RColorBrewer)
+library(ggplot2)
+
+SuperPop<-c("AFR","AMR","EAS","EUR","SAS")
+Color<-c("Orange", "Red", "Blue", "Yellow", "Green" )
+
+Pop<-c("YRI","LWK","GWD","MSL","ESN","ASW","ACB","MXL","PUR","CLM","PEL","CHB","JPT","CHS","CDX","KHV","CEU","TSI","GBR","FIN","IBS","GIH","PJL","BEB","STU","ITU")
+Color<-c("Orange","Orange","Orange","Orange","Orange","Orange","Orange", "Red","Red","Red","Red", "Blue","Blue","Blue","Blue","Blue", "Yellow","Yellow","Yellow","Yellow","Yellow", "Green","Green","Green","Green","Green")
+
+Ref_colors<-as.data.table(cbind(SuperPop,Color))
+Ref_colors<-as.data.table(cbind(Pop,Color))
+fwrite(Ref_colors, "/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/QC/1000G_PopColors.txt",sep="\t")
+fwrite(Ref_colors, "/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/QC/1000G_PopColors_Granular.txt",sep="\t")
+
+
+par(mar = c(5,5,5,5), cex = 2.0,
+  cex.main = 7, cex.axis = 2.75, cex.lab = 2.75, mfrow = c(1,2))
+
+Ref_PCs<-dplyr::filter(PCs_3, !is.na(PCs_3$SuperPop))
+POPs_PCs<-dplyr::filter(PCs_3, is.na(PCs_3$SuperPop))
+
+
+PCs_3$SuperPop[is.na(PCs_3$SuperPop)] = "POPs"
+PCs_3$Population[is.na(PCs_3$Population)] = "POPs"
+
+pop.cols <- setNames(brewer.pal(6, "Paired"),
+    c("AFR", "AMR","EAS", "EUR","SAS","POPs"))
+
+pop.cols <-colorRampPalette(brewer.pal(8,"Paired"),
+                    c("YRI","LWK","GWD","MSL","ESN","ASW","ACB","MXL","PUR","CLM","PEL","CHB","JPT","CHS","CDX","KHV","CEU","TSI","GBR","FIN","IBS","GIH","PJL","BEB","STU","ITU","POPs"))
+
+numcols<-27
+pop.cols <-colorRampPalette(brewer.pal(8,"Paired"))(numcols)
+
+ggplot(Ref_PCs, aes(V3, V4, color=SuperPop)) + geom_point() +
+    scale_color_manual(values=pop.cols) +
+  labs(x="PC1", y="PC2", title="1000Genomes: PC1 vs PC2")
+
+Pop_1G<-ggplot(Ref_PCs, aes(V3, V4, color=Population)) + geom_point() +
+    scale_color_manual(values=pop.cols) +
+  labs(x="PC1", y="PC2", title="1000Genomes: PC1 vs PC2")
+
+ggplot(PCs_3, aes(V3, V4, color=SuperPop)) + geom_point() +
+    scale_color_manual(values=pop.cols) +
+  labs(x="PC1", y="PC2", title="1000Genomes and POPs: PC1 vs PC2")
+
+pop.cols2<-setNames(brewer.pal(4, "Paired"),
+    c("BLACK", "OTHER/UNKNOWN","ASIAN", "WHITE"))
+
+ggplot(POPs_PCs, aes(V3, V4, color=mat_race_ethnicity)) + geom_point() +
+    scale_color_manual(values=pop.cols2) +
+  labs(x="PC1", y="PC2", title="POPs: PC1 vs PC2")
+
+
+POPs_PCs_Child<-dplyr::filter(PCs_3, status == "child")
+ggplot(POPs_PCs_Child, aes(V3, V4, shape = as.factor(mixed), color=mat_race_ethnicity)) + geom_point() +
+    scale_color_manual(values=pop.cols2) +
+  labs(x="PC1", y="PC2", title="POPs Children: PC1 vs PC2")
+
+
+##Check ancestry to identify those of European descent
+library(plinkQC)
+
+prefix <-"/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/QC/POP_1G_merged"
+out <- "/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/QC/POP_1G_merged"
+name="POP_1G_merged"
+
+scaling_factor=1.5
+legend_labels_per_row=6
+studyColor="black" 
+
+samples <- data.table::fread(paste(prefix, ".fam", sep=""),
+                                 header=FALSE, stringsAsFactors=FALSE,
+                                 data.table=FALSE)[,1:2]
+colnames(samples) <- c("FID", "IID")
+
+testNumerics(numbers=c(scaling_factor, legend_labels_per_row),
+                 positives=c(scaling_factor, legend_labels_per_row))
+
+pca_data <- data.table::fread(paste(out, ".eigenvec", sep=""),
+                                  stringsAsFactors=FALSE, data.table=FALSE)
+
+colnames(pca_data) <- c("FID", "IID", paste("PC",1:(ncol(pca_data)-2),
+                                                sep=""))
+
+refSamplesFile="/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/QC/1000G_ID2Pop_Granular.txt"
+
+refColorsFile="/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/QC/1000G_PopColors_Granular.txt"
+refSamplesIID="IID"
+refSamplesPop="Pop"
+refColorsColor="Color"
+refColorsPop="Pop"
+refPopulation=c("GBR")
+refPopulation=c("STU","ITU")
+
+legend_labels_per_row=6
+highlight_samples = NULL
+highlight_type =c("color")
+highlight_text_size = 3
+highlight_color = "#c51b8a"
+highlight_shape = 17
+highlight_legend = TRUE
+                              
+
+refSamples <- read.table(refSamplesFile, header=TRUE,stringsAsFactors=FALSE)
+refSamples <- refSamples[Ref_PCs$`#IID` %in% refSamples$IID,]
+      
+
+names(refSamples)[names(refSamples) == refSamplesIID] <- "IID"
+names(refSamples)[names(refSamples) == refSamplesPop] <- "Pop"
+refSamples <- dplyr::select(refSamples, IID, Pop)
+    refSamples$IID <- as.character(refSamples$IID)
+    refSamples$Pop <- as.character(refSamples$Pop)
+    
+refColors <- read.table(refColorsFile, header=TRUE,stringsAsFactors=FALSE)
+  names(refColors)[names(refColors) == refColorsColor] <- "Color"
+        names(refColors)[names(refColors) == refColorsPop] <- "Pop"
+        refColors <- dplyr::select(refColors, Pop, Color)
+        refColors$Color <- as.character(refColors$Color)
+        refColors$Pop <- as.character(refColors$Pop)
+        
+ refSamples <- merge(refSamples, refColors, by="Pop", all.X=TRUE)
+ 
+     ## Combine pca data and population information ####
+ 
+ samples<-dplyr::filter(data_all,is.na(Color))
+ 
+    data_all <- merge(pca_data, refSamples, by="IID", all.x=TRUE)
+    data_all$Pop[data_all$IID %in% samples$IID] <- "POPs"
+    data_all$Color[data_all$IID %in% samples$IID] <- studyColor
+    
+    colors <-  dplyr::select(data_all, Pop, Color)
+    colors <- colors[!duplicated(colors$Pop),]
+    colors <- colors[order(colors$Color),]
+    
+## Find mean coordinates and distances of reference Europeans:GBR ###
+    #data_all <- merge(pca_data, refSamples, by="IID", all.x=TRUE)
+    all_european <- dplyr::filter(data_all, Pop %in% refPopulation)
+    euro_pc1_mean <- mean(all_european$PC1)
+    euro_pc2_mean <- mean(all_european$PC2)
+
+    all_european$euclid_dist <- sqrt((all_european$PC1 - euro_pc1_mean)^2 +
+                                         (all_european$PC2 - euro_pc2_mean)^2)
+
+    max_euclid_dist <- max(all_european$euclid_dist)
+    
+
+    
+## Find samples' distances to reference Europeans ####
+    data_name <- dplyr::filter(data_all, Pop == "POPs")
+    data_name$euclid_dist <- sqrt((data_name$PC1 - euro_pc1_mean)^2 +
+                                      (data_name$PC2 - euro_pc2_mean)^2)
+    non_europeans <- dplyr::filter(data_name, .data$euclid_dist >
+                                        (max_euclid_dist * scaling_factor))
+    fail_ancestry <- dplyr::select(non_europeans, FID, IID)
+ 
+  GBR_Pop<-Ref_PCs[!(Ref_PCs$`#IID` %in% fail_ancestry$IID | Ref_PCs$FID == 0),]  
+  GBR_Pop1<-GBR_Pop[,c("FID","#IID","status","mat_race_ethnicity","pat_race_ethnicity","mixed")]
+  
+  Child_IDs<-fread("/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/Final_Child_ID.txt")
+  
+  V1<-c(326,2990)
+  V2<-c("204820920004_R10C01","204820920021_R02C01")
+  
+  Missing_proteins<-cbind(V1,V2)
+  
+  Child_IDs1<-rbind(Child_IDs,Missing_proteins)
+  
+  GBR_Pop2<-Child_IDs1[Child_IDs1$V2 %in% GBR_Pop1$`#IID`,]
+  fwrite(GBR_Pop2, "/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/Final_Child_ID_GBR.txt", sep="\t",col.names=F)
+  
+   Child_IDs_noPE<-fread("/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/Final_Child_ID_noPE.txt") 
+   
+   GBR_Pop2_noPE<-Child_IDs_noPE[Child_IDs_noPE$V2 %in% GBR_Pop2$V2,]
+fwrite(GBR_Pop2_noPE,"/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/Final_Child_ID_GBR_noPE.txt", sep="\t",col.names=F)
+
+  Mom_IDs<-fread("/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/Final_Mom_ID.txt")
+  
+    GBR_Pop3<-Mom_IDs[Mom_IDs$V2 %in% GBR_Pop1$`#IID`,]
+  fwrite(GBR_Pop3, "/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/Final_Mom_ID_GBR.txt", sep="\t")
+  
+     Mom_IDs_noPE<-fread("/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/Final_Mom_ID_noPE.txt") 
+   
+   GBR_Pop3_noPE<-Mom_IDs_noPE[Mom_IDs_noPE$V2 %in% GBR_Pop3$V2,]
+fwrite(GBR_Pop3_noPE,"/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/Final_Mom_ID_GBR_noPE.txt", sep="\t",col.names=F)
+  
+
+    
+    
+colors$Color[colors$Pop == "GBR"] = "yellow"
+    
+ggplot(data_all, aes(PC1, PC2, color=Pop)) + geom_point(alpha=0.5) +
+    scale_color_manual(values=colors$Color, name="Pop") + scale_shape_manual(values=c(16, highlight_shape), guide="none") +
+        guides(color=guide_legend(nrow=legend_rows, byrow=TRUE)) +
+        ggforce::geom_circle(aes(x0=euro_pc1_mean, y0=euro_pc2_mean,
+                                 r=(max_euclid_dist * scaling_factor))) +
+        ggtitle("PCA on combined reference and study genotypes - EUR Similarity Group") +
+        theme_bw() +
+        theme(legend.position='bottom',
+              legend.direction = 'vertical',
+              legend.box = "vertical",
+              legend.text = element_text(size = 5),
+              legend.title = element_text(size = 7),
+              title = element_text(size = 9),
+              axis.text = element_text(size = 5),
+              axis.title = element_text(size = 7))
+
+
+```
+
+### Post-Imputation
+
+```{r}
+#Gathering info files together - for in the HPC directory
+
+files <- list.files(path = "/home/jam248/rds/hpc-work/POPs/Genotype_Data/Imputation/Output/Imputed_Set/",
+  pattern = "info.gz", full.names = TRUE)
+
+do.call(rbind,files, fread, header=T)
+
+```

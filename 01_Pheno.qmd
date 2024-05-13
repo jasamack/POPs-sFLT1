@@ -1,0 +1,510 @@
+---
+title: "Phenotyping hypertensive disorders of pregnancy in POPs"
+format: html
+editor: visual
+jupyter: python3
+author: Jasmine A. Mack
+date: January 17, 2023
+---
+
+## Summary
+
+-   Objective: Let's define hypertension during pregnancy, an adverse pregnancy outcome (APO), in the POPs cohort.
+
+-   This phenotyping information will be used to perform GWAS of various protein levels (z-score of log-transformed values)
+
+Load in the dependencies required:
+
+```{r}
+library(dplyr)
+library(data.table)
+library(readxl)
+library(VennDiagram)
+library(tableone)
+library(DAKS)
+library(PerformanceAnalytics)
+library(psych)
+```
+
+Let's load in the phenotyping data set now, prepared by Ulla Sovio
+
+Also opening the genotyping file with flags
+
+```{r}
+setwd("/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs")
+
+pops<-read_excel("/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/POPS_phenotype_data_extract_JM_Samplenumbers_2022.xlsx")
+
+pops_sex_ped<-fread("/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/Pheno_Geno_UpdatedFlags.txt")
+
+```
+
+Note that the outcome of interest is across four time points (12, 20, 28, 36 weeks gestation).
+
+Variable: log10sFlt_1_MoM_adjGAwtst1Z - z score of log10(Adjusted sFlt MoM at 12wkGA)
+
+```{r}
+summary(pops$log10sFlt_1_MoM_adjGAwtst1Z)
+summary(pops$log10sFlt_1_MoM_adjGAwtst2Z)
+summary(pops$log10sFlt_1_MoM_adjGAwtst3Z)
+summary(pops$log10sFlt_1_MoM_adjGAwtst4Z)
+
+#tapply(pops$log10sFlt_1_MoM_adjGAwtst4Z, pops$group, summary)
+```
+
+Note there is hundreds missing protein levels across time point. We will perform complete case analysis for cross-sectional analyses
+
+```{r}
+
+pops$sFlt1_flag<-ifelse(is.na(pops$log10sFlt_1_MoM_adjGAwtst1Z),0,1)
+pops$sFlt2_flag<-ifelse(is.na(pops$log10sFlt_1_MoM_adjGAwtst2Z),0,1)
+pops$sFlt3_flag<-ifelse(is.na(pops$log10sFlt_1_MoM_adjGAwtst3Z),0,1)
+pops$sFlt4_flag<-ifelse(is.na(pops$log10sFlt_1_MoM_adjGAwtst4Z),0,1)
+
+pops$sflt1_sum_measures = pops$sFlt1_flag + pops$sFlt2_flag + pops$sFlt3_flag + pops$sFlt4_flag
+
+pops_sum<-pops[,161:165]
+
+table(pops$sflt1_sum_measures,exclude=F)
+
+pops_sum1<-pops_sum[,1:4]
+pattern(pops_sum1, n = 4)  #214 with less prevalent follow-up patterns
+pattern(pops_sum1, n = 16) #16 different response patterns
+
+#table(pops$pn_female) #Fetal sex
+```
+
+### Matching Plate IDs to Sample IDs
+
+```{r}
+Link<-fread("/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/Pheno_Geno_Linkage_ID.csv")
+
+pops1<-as.data.frame(pops)
+
+maternal_Link<-Link[,c("Sample_ID","ID","no_geno_flag")]
+maternal_Link<-dplyr::rename(maternal_Link, m_Samplenumber = Sample_ID , m_ID = ID)
+
+child_Link<-Link[,c("Sample_ID","ID","no_geno_flag")]
+child_Link<-dplyr::rename(child_Link, c_Samplenumber = Sample_ID , c_ID = ID)
+
+pops2<-merge(pops, maternal_Link, by="m_Samplenumber",all.x=T)
+maternal_pops<-pops2[,c("POPSID","m_Samplenumber","m_ID", "m_ind","c_ind","pn_female","no_geno_flag")]
+
+maternal_pops$status<-"mother"
+
+pops3<-merge(pops, child_Link, by="c_Samplenumber",all.x=T)
+fetal_pops<-pops3[,c("POPSID","c_Samplenumber","c_ID", "m_ind","c_ind","pn_female","no_geno_flag")]
+
+fetal_pops$status<-"child"
+
+##Creating sex variable for PLINK: 1 = male, 2 = female
+maternal_pops$sex<-2
+fetal_pops$sex<-ifelse(fetal_pops$pn_female==1,2,1)
+fetal_pops$sex[is.na(fetal_pops$pn_female)] = 0
+
+maternal_pops<-dplyr::rename(maternal_pops, ID = m_ID, sample_num = m_Samplenumber)
+fetal_pops<-dplyr::rename(fetal_pops, ID = c_ID, sample_num = c_Samplenumber)
+
+pops_sex_ped<-rbind(maternal_pops,fetal_pops)
+pops_sex_ped$pair<- pops_sex_ped$m_ind + pops_sex_ped$c_ind
+
+
+pops_sex_ped<-dplyr::filter(pops_sex_ped, !is.na(ID))
+
+pops_mat<-pops2[,c("m_Samplenumber", "POPSID", "m_ID")]
+
+pops_sex_ped<-merge(pops_sex_ped, pops_mat, by="POPSID")
+
+fwrite(pops_sex_ped, "/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/Pheno_Geno_Updated.txt", sep="\t" )
+
+
+```
+
+### Checking Missingness of Covariates
+
+```{r}
+
+four<-dplyr::filter(pops, is.na(log10sFlt_1_MoM_adjGAwtst4Z))
+
+
+Covars<-c("an_est_age", "an_agefte", "ast_IMD2007score","an_married", "an_smoker", "an_alcohol_bin","pn_ethnicity", "an_scan1_bmi")
+
+
+Covar_full<-na.omit(pops[c(Covars)])
+
+```
+
+### 
+
+### Re-defining race/ethnicity
+
+```{r}
+#pn_ethnicity, pn_ethother, pn_partnerethnicity,pn_partethother
+
+table(pops$pn_ethnicity,exclude=F)
+
+Ethn_tab<-as.data.frame(table(pops$pn_ethnicity, pops$pn_ethother, exclude=F))
+
+Ethn_tab<-dplyr::filter(Ethn_tab, Freq!=0)
+
+#To-do: Group not documented, unknown, missing together
+#To-do: Go back to ensure all missing is accounted for
+
+table(pops$pn_ethother)
+
+PC_Air$race_cat[PC_Air$race==1 & PC_Air$ethnicity!=1] = "X"
+
+pops<-as.data.table(pops)
+pops$mat_race_ethnicity[pops$pn_ethnicity %in% c("NOT DOCUMENTED", "OTHER", "UNKNOWN","SOUTH AMERICAN") | pops$pn_ethother %in% c("BRAZILIAN","HISPANIC AMERICAN","SOUTH AMERICAN") | pops$pn_ethother %in% c("SOUTH AFRICAN","W", "PERSIAN", "IRANIAN", "EGYPTIAN","EURASIAN") | pops$pn_ethother %in% c("MIXED BLACK & WHITE", "MIXED RACE", "MIXED WHITE AND AFRI") | (is.na(pops$pn_ethnicity) & is.na(pops$pn_ethother))] = "OTHER/UNKNOWN" 
+
+pops$mat_race_ethnicity[pops$pn_ethnicity %in% c("ASIAN", "ASIAN (OTHER)", "ASIAN, JAPANESE, PAKISTAN","JAPANESE", "PAKISTAN","BANGLADESHI", "CHINESE","INDIAN","PAKISTANI", "PAKISTANI ASIAN") | pops$pn_ethother %in% c("AFGHANISTAN","FILIPINO","JAPANESE","JAPANESE (ASIAN OTHER)", "KOREAN", "SOUTH EAST ASIAN", "SRI LANKAN", "SRI LANKEN", "THAI", "THAILAND", "PHILAPINO","PHILIPINO", "VIETNAMESE", "FAR EAST ASIAN" )] = "ASIAN"
+
+ 
+pops$mat_race_ethnicity[pops$pn_ethnicity %in% c("BLACK","BLACK AFRICAN", "BLACK CARIBBEAN", "BLACK OTHER") | pops$pn_ethother %in% c("LIBYAN","MAURITIAN")] = "BLACK"
+  
+pops$mat_race_ethnicity[pops$pn_ethnicity %in% c("WHITE", "WHITE POLISH","WHITE SOUTHERN EUROPIAN") | pops$pn_ethother %in% c ("LITHUARIAN", "SOUTHERN EUROPEAN","TURKISH")] = "WHITE"
+
+table(pops$mat_race_ethnicity,exclude=F)
+
+#Paternal race/ethnicity/ancestry
+
+table(pops$pn_partnerethnicity,exclude=F)
+
+Ethn_tab1<-as.data.frame(table(pops$pn_partnerethnicity, pops$pn_partethother, exclude=F))
+
+Ethn_tab1<-dplyr::filter(Ethn_tab1, Freq!=0)
+
+
+pops$pat_race_ethnicity[pops$pn_partnerethnicity %in% c("NOT DOCUMENTED", "OTHER", "UNKNOWN","NOT APPLICABLE","SOUTH AMERICAN","MIXED WHITE & BLACK CARIBBEAN","N/A") | pops$pn_partethother %in% c("IRISH/SRI LANKAN","ARABIC","CHILE OTHER NON-EUROPEAN", "EGYPTIAN","IRANIAN","PERSIAN","MIDDLE EASTERN", "CHINESE/WHITE","INDO CARIBBEAN","WHITE/ MAURITIAN","MIXED WHITE & BLACK CARIBBEAN","MIXED BLACK & WHITE","MIXED BLACK CARRABEAN & BRITISH","MIXED BRITISH", "MIXED INDIAN & WHITE" ,"MIXED WHITE & BLACK","BRAZILIAN","MEXICAN","NOT APPLICABLE") | (is.na(pops$pn_partnerethnicity) & is.na(pops$pn_partethother))] = "OTHER/UNKNOWN"
+                        
+pops$pat_race_ethnicity[pops$pn_partnerethnicity %in% c("ASIAN", "ASIAN (OTHER)", "ASIAN OTHER","JAPANESE", "BANGLADESHI", "CHINESE","INDIAN","PAKISTANI", "PAKISTANI ASIAN") | pops$pn_partethother %in% c("ASIAN","FILIPINO","SINGAPORE", "SRI LANKAN", "SRI LANKEN","AFGHANISTAN","BURMESE INDIAN","FAR EAST ASIAN","JAPANESE","PHILIPINO","PHILIPINO CHINESE", "VIETNAMESE")] = "ASIAN"
+
+pops$pat_race_ethnicity[pops$pn_partnerethnicity %in% c("BLACK","BLACK AFRICAN", "BLACK CARIBBEAN", "BLACK CARIBEAN", "BLACK OTHER","BLACK  OTHER") | pops$pn_partethother %in% c("BLACK", "BLACK OTHER", "LIBYAN","MAURITIAN")] = "BLACK"
+
+pops$pat_race_ethnicity[pops$pn_partnerethnicity %in% c("WHITE", "WHITE MIDDLE EASTERN", "WHITE SOUTHERN EUROPEAN") | pops$pn_partethother %in% c("HUNGARAIAN","SOUTH AFRICAN - WHITE","TURKISH","WHITE EUROPEAN OTHER", "GREEK","SOUTHERN EUROPEAN") ] = "WHITE"  
+    
+table(pops$pat_race_ethnicity,exclude =F)
+
+#t<-dplyr::filter(pops, is.na(pat_race_ethnicity))
+
+Ethn_tab2<-as.data.frame(table(pops$mat_race_ethnicity, pops$pat_race_ethnicity, exclude=F))
+
+#Defining here by self-reported ancestry, to use the same groupings as given for 1000 Genomes: 
+# EAS, SAS, EUR, AFR, AMR
+# Check-in for OCE and MNA
+#How to sufficiently parse between east and south asian?
+
+
+#Merge in ethnicity information with the pops_sex_ped dataset
+
+pops_ethn<-merge(pops_sex_ped,pops, by="POPSID", all.x=T)
+pops_ethn<-pops_ethn[,c(1:12,172,173)]
+
+#Identifying children of multiple ethnicities (n = 316)
+pops_ethn$mixed<-ifelse(pops_ethn$mat_race_ethnicity != pops_ethn$pat_race_ethnicity & pops_ethn$status == "child",1,NA )
+
+pops_ethn<-pops_ethn[,c("POPSID","ID","status","pair","mat_race_ethnicity","pat_race_ethnicity","mixed")]
+
+fwrite(pops_ethn,"/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/QC/POPs_ethnicity.txt",sep="\t")
+```
+
+### Covariates for GWAS
+
+```{r}
+
+pops_ethn<-fread("/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/QC/POPs_ethnicity.txt")
+
+newflag<-fread("/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/Pheno_Geno_UpdatedFlags.txt")
+
+
+#Refer to newflag from the genotyping qmd
+link<-dplyr::filter(newflag, GWAS_Flag == 1)
+link<-link[,c("POPSID", "ID","sample_num", "status", "SNPSEX" )]
+
+link_freq<-as.data.frame(table(link$POPSID))
+
+link_both<-dplyr::filter(link_freq, Freq==2)
+link_both1<-link[link$POPSID %in% link_both$Var1]
+link_both1<-dplyr::filter(link_both1,status=="child")
+
+link_one<-dplyr::filter(link_freq, Freq==1)
+link_one1<-link[link$POPSID %in% link_one$Var1]
+
+link<-rbind(link_both1,link_one1)
+
+#Bring in PCs from PCair
+
+PCs<-fread("/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/PCs_POPs.txt")
+
+PCs<-PCs[,1:11]
+
+PC_link<-merge(link,PCs,by.x="ID",by.y="IID")
+
+pops_ethn<-pops_ethn[,c("POPSID","ID","mat_race_ethnicity","pat_race_ethnicity","mixed")]
+PC_link_ethn<-merge(PC_link,pops_ethn,by=c("POPSID","ID"),all.x=T)
+
+#Limiting to covariates of interest
+
+phenotype<-c("log10sFlt_1_MoM_adjGAwtst1Z","log10sFlt_1_MoM_adjGAwtst2Z","log10sFlt_1_MoM_adjGAwtst3Z","log10sFlt_1_MoM_adjGAwtst4Z",
+             "log10PlGF_MoM_adjGAwtst1Z","log10PlGF_MoM_adjGAwtst2Z","log10PlGF_MoM_adjGAwtst3Z","log10PlGF_MoM_adjGAwtst4Z",
+             "log10hCGbeta_MoM_adjGAwtst1Z","log10hCGbeta_MoM_adjGAwtst2Z","log10hCGbeta_MoM_adjGAwtst3Z","log10hCGbeta_MoM_adjGAwtst4Z",
+             "log10AFP_MoM_adjGAwtst1Z","log10AFP_MoM_adjGAwtst2Z","log10AFP_MoM_adjGAwtst3Z","log10AFP_MoM_adjGAwtst4Z",
+             "log10PAPP_A_MoM_adjGAwtst1Z","log10PAPP_A_MoM_adjGAwtst2Z","log10PAPP_A_MoM_adjGAwtst3Z","log10PAPP_A_MoM_adjGAwtst4Z")
+iids<-c("POPSID", "ID")
+addtl_covars<-c("mat_race_ethnicity","SNPSEX","an_est_age","an_scan1_bmi","an_agefte","ast_IMD2007score","an_married","an_smoker","an_alcohol_bin","pn_petACOG13")
+#,"pn_petACOG13_sev","pn_petACOG13_detail", "SGAlt10_Br1990","pn_ga_wk")
+PCs<-c("V1","V2","V3", "V4","V5","V6","V7","V8","V9","V10")
+covar<-c("SNPSEX","an_est_age","mat_race_ethnicity","an_scan1_bmi","an_alcohol_bin")
+
+
+#Imputing covariates: 5th May
+library(Amelia)
+pops_update<-as.data.frame(merge(pops,PC_link_ethn,by="POPSID"))
+pops_update_uq<-pops_update
+
+pops.orig<-pops_update_uq[c(iids,addtl_covars)]
+missmap(pops.orig, main = "Missing values vs observed")
+
+hist(pops_update_uq$ast_IMD2007score)
+summary(pops_update_uq$ast_IMD2007score)
+hist(pops_update_uq$an_scan1_bmi)
+hist(pops_update_uq$an_agefte)
+summary(pops_update_uq$an_agefte)
+summary(pops_update_uq$an_est_age)
+summary(pops_update_uq$an_scan1_bmi)
+table(pops_update_uq$pn_petACOG13,exclude=F)
+
+#Let's impute simple imputation
+
+pops_update_uq$an_scan1_bmi<-ifelse(is.na(pops_update_uq$an_scan1_bmi), 24.09, pops_update_uq$an_scan1_bmi)
+
+pops_update_uq$ast_IMD2007score<-ifelse(is.na(pops_update_uq$ast_IMD2007score), 9.06, pops_update_uq$ast_IMD2007score)
+
+pops_update_uq$an_agefte<-ifelse(is.na(pops_update_uq$an_agefte), 21.00, pops_update_uq$an_agefte)
+
+pops_update_uq$pn_petACOG13<-ifelse(is.na(pops_update_uq$pn_petACOG13), 1, pops_update_uq$pn_petACOG13)
+
+pops_update_uq$an_alcohol_bin<-ifelse(is.na(pops_update_uq$an_alcohol_bin), 0, pops_update_uq$an_alcohol_bin)
+
+pops.orig2<-pops_update_uq[c(iids,addtl_covars)]
+missmap(pops.orig2, main = "Missing values vs observed")
+
+iids<-c("POPSID","ID")
+pops.orig3<-pops_update_uq[c(iids,phenotype)]
+missmap(pops.orig3, main = "Missing values vs observed")
+
+#Response pattern is the same for all proteins
+
+pops.orig3$sFlt1_flag<-ifelse(is.na(pops.orig3$log10sFlt_1_MoM_adjGAwtst1Z),0,1)
+pops.orig3$sFlt2_flag<-ifelse(is.na(pops.orig3$log10sFlt_1_MoM_adjGAwtst2Z),0,1)
+pops.orig3$sFlt3_flag<-ifelse(is.na(pops.orig3$log10sFlt_1_MoM_adjGAwtst3Z),0,1)
+pops.orig3$sFlt4_flag<-ifelse(is.na(pops.orig3$log10sFlt_1_MoM_adjGAwtst4Z),0,1)
+
+pops.orig3$sflt1_sum_measures = pops.orig3$sFlt1_flag + pops.orig3$sFlt2_flag + pops.orig3$sFlt3_flag + pops.orig3$sFlt4_flag
+
+
+#Remove those missing all sflt1 measures
+
+pops.orig3<-dplyr::filter(pops.orig3, sflt1_sum_measures!=0)
+pops_update_uq<-pops_update_uq[(pops_update_uq$POPSID %in% pops.orig3$POPSID),]
+
+#pattern(pops.orig3[5:8], n = 17) 
+
+##
+
+## Run Regression to see which covariates are significantly associated with each protein measurement
+
+#hist(pops_update_uq$log10sFlt_1_MoM_adjGAwtst1Z)
+#hist(pops_update_uq$log10sFlt_1_MoM_adjGAwtst2Z)
+#hist(pops_update_uq$log10sFlt_1_MoM_adjGAwtst3Z)
+#hist(pops_update_uq$log10sFlt_1_MoM_adjGAwtst4Z)
+summary(pops_update_uq$log10sFlt_1_MoM_adjGAwtst1Z) #NA = 122
+summary(pops_update_uq$log10sFlt_1_MoM_adjGAwtst2Z) #NA = 148
+summary(pops_update_uq$log10sFlt_1_MoM_adjGAwtst3Z) #NA = 170
+summary(pops_update_uq$log10sFlt_1_MoM_adjGAwtst4Z) #NA = 372
+
+
+pops_update_uq$mat_race_ethnicity<-as.factor(pops_update_uq$mat_race_ethnicity)
+pops_update_uq$mat_race_ethnicity<-relevel(pops_update_uq$mat_race_ethnicity, "WHITE")
+
+library(MASS)
+
+#Let's redo for only looking at fetal sex, excluding mom sex
+
+pops_update_uq$fetal_sex<-ifelse((pops_update_uq$ID %in% child$ID),child$SNPSEX,0)
+
+ID<-c("POPSID")
+pops.orig2<-pops_update_uq[c(ID,phenotype,covar)]
+
+
+#Retrieve updated covariates
+
+pops_update2<-merge(pops.orig2,PC_link_ethn1,by=c("POPSID"),all.y=T)
+#missmap(pops_update2[covar], main = "Missing values vs observed")
+
+#Remove IDs with no sFLT1 measurement
+pops_update2<-dplyr::filter(pops_update2,POPSID!=326 & POPSID!=2990)
+Check<-as.data.frame(table(pops_update2$POPSID))
+
+#pops_updateuq2<-dplyr::filter(pops_update_uq,POPSID!=326 & POPSID!=2990)
+#Check<-as.data.frame(table(pops_updateuq2$POPSID))
+
+covar_forall<-pops_update2[,c(1:29)]
+GWAS_IDs<-dplyr::filter(newflag, GWAS_Flag==1)[,c("POPSID","ID","status")]
+covar_link<-merge(GWAS_IDs,covar_forall,by="POPSID")
+
+mmerge<-merge(covar_link,PCs,by.x="ID",by.y="IID",all.x=T)
+
+pops_update_mom<-as.data.frame(dplyr::filter(mmerge, status == "mother"))
+
+pops_mom_pheno<-pops_update_mom[c(iids,phenotype)]
+pops_mom_pheno<-dplyr::rename(pops_mom_pheno, FID=POPSID, IID=ID)
+pops_mom_pheno$log10sFlt_1_MoM_adjGAwtst_36_28_diff<- pops_mom_pheno$log10sFlt_1_MoM_adjGAwtst4Z - pops_mom_pheno$log10sFlt_1_MoM_adjGAwtst3Z
+
+#n = 3685 mothers
+#summary(pops_mom_pheno$log10sFlt_1_MoM_adjGAwtst1Z) #NA = 112
+#summary(pops_mom_pheno$log10sFlt_1_MoM_adjGAwtst2Z) #NA = 73
+#summary(pops_mom_pheno$log10sFlt_1_MoM_adjGAwtst3Z) #NA = 150
+#summary(pops_mom_pheno$log10sFlt_1_MoM_adjGAwtst4Z) #NA = 334
+
+fwrite(pops_mom_pheno,"/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/PHENO_PLINK_mom.txt",sep="\t",na="NA", quote=F)
+
+pheno<-fread("/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/PHENO_PLINK_mom.txt")
+
+#Adding in the other difference variables for the four placental proteins
+pops_mom_pheno<-pheno
+pops_mom_pheno$log10PlGF_MoM_adjGAwtst_36_28_diff<- pops_mom_pheno$log10PlGF_MoM_adjGAwtst4Z - pops_mom_pheno$log10PlGF_MoM_adjGAwtst3Z
+pops_mom_pheno$log10hCGbeta_MoM_adjGAwtst_36_28_diff<- pops_mom_pheno$log10hCGbeta_MoM_adjGAwtst4Z - pops_mom_pheno$log10hCGbeta_MoM_adjGAwtst3Z
+pops_mom_pheno$log10AFP_MoM_adjGAwtst_36_28_diff<- pops_mom_pheno$log10AFP_MoM_adjGAwtst4Z - pops_mom_pheno$log10AFP_MoM_adjGAwtst3Z
+pops_mom_pheno$log10PAPP_A_MoM_adjGAwtst_36_28_diff<- pops_mom_pheno$log10PAPP_A_MoM_adjGAwtst4Z - pops_mom_pheno$log10PAPP_A_MoM_adjGAwtst3Z
+
+fwrite(pops_mom_pheno,"/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/PHENO_PLINK_mom.txt",sep="\t",na="NA", quote=F)
+
+
+##
+pops_mom_covar<-pops_update_mom[,c(1,2,24:41)]
+
+
+pops_mom_covar<-dplyr::rename(pops_mom_covar, FID=POPSID, IID=ID,sex_update=SNPSEX.x)
+
+fwrite(pops_mom_covar,"/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/COVAR_PLINK_mom.txt",sep="\t",na="NA", quote=F)
+
+covar<-as.data.frame(fread("/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/COVAR_PLINK_mom.txt"))
+
+#order<-c(2,1,3:ncol(covar))
+#covar<-covar[,order]
+
+#Add in deprivation index
+depv_index<-pops_update_uq[,c("POPSID","ast_IMD2007score")]
+covar<-merge(depv_index,covar,by.y="FID",by.x="POPSID", all.y=T)
+
+order<-c(1,3,2,4:ncol(covar))
+covar<-covar[,order]
+
+covar<-dplyr::rename(covar,FID=POPSID)
+
+fwrite(covar,"/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/COVAR_PLINK_mom.txt",sep="\t",na="NA", quote=F)
+
+pops_update_child<-as.data.frame(dplyr::filter(mmerge, status == "child"))
+pops_child_pheno<-pops_update_child[c(iids,phenotype)]
+pops_child_pheno<-dplyr::rename(pops_child_pheno, FID=POPSID, IID=ID)
+pops_child_pheno$log10sFlt_1_MoM_adjGAwtst_36_28_diff<- pops_child_pheno$log10sFlt_1_MoM_adjGAwtst4Z - pops_child_pheno$log10sFlt_1_MoM_adjGAwtst3Z
+
+#n = 3484
+#summary(pops_child_pheno$log10sFlt_1_MoM_adjGAwtst1Z) #NA = 109
+#summary(pops_child_pheno$log10sFlt_1_MoM_adjGAwtst2Z) #NA = 136
+#summary(pops_child_pheno$log10sFlt_1_MoM_adjGAwtst3Z) #NA = 138
+#summary(pops_child_pheno$log10sFlt_1_MoM_adjGAwtst4Z) #NA = 302
+
+fwrite(pops_child_pheno,"/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/PHENO_PLINK_child.txt",sep="\t",na="NA", quote=F)
+
+pheno<-fread("/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/PHENO_PLINK_child.txt")
+
+#Adding in the other difference variables for the four placental proteins
+pops_child_pheno<-pheno
+pops_child_pheno$log10PlGF_MoM_adjGAwtst_36_28_diff<- pops_child_pheno$log10PlGF_MoM_adjGAwtst4Z - pops_child_pheno$log10PlGF_MoM_adjGAwtst3Z
+pops_child_pheno$log10hCGbeta_MoM_adjGAwtst_36_28_diff<- pops_child_pheno$log10hCGbeta_MoM_adjGAwtst4Z - pops_child_pheno$log10hCGbeta_MoM_adjGAwtst3Z
+pops_child_pheno$log10AFP_MoM_adjGAwtst_36_28_diff<- pops_child_pheno$log10AFP_MoM_adjGAwtst4Z - pops_child_pheno$log10AFP_MoM_adjGAwtst3Z
+pops_child_pheno$log10PAPP_A_MoM_adjGAwtst_36_28_diff<- pops_child_pheno$log10PAPP_A_MoM_adjGAwtst4Z - pops_child_pheno$log10PAPP_A_MoM_adjGAwtst3Z
+
+fwrite(pops_child_pheno,"/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/PHENO_PLINK_child.txt",sep="\t",na="NA", quote=F)
+
+pops_child_covar<-pops_update_child[,c(1,2,24:41)]
+pops_child_covar<-dplyr::rename(pops_child_covar, FID=POPSID, IID=ID, sex_update=SNPSEX.x)
+
+fwrite(pops_child_covar,"/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/COVAR_PLINK_child.txt",sep="\t",na="NA", quote=F)
+
+covar<-as.data.frame(fread("/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/COVAR_PLINK_child.txt"))
+
+#order<-c(2,1,3:ncol(covar))
+#covar<-covar[,order]
+
+#Add in deprivation index
+covar<-merge(depv_index,covar,by.y="FID",by.x="POPSID", all.y=T)
+order<-c(1,3,2,4:ncol(covar))
+covar<-covar[,order]
+
+covar<-dplyr::rename(covar,FID=POPSID)
+
+fwrite(covar,"/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/COVAR_PLINK_child.txt",sep="\t",na="NA", quote=F)
+
+#Separate IIDs for mother and child
+pops_mom<-pops_mom_pheno[,c("FID","IID")]
+pops_child<-pops_child_pheno[,c("FID","IID")]
+
+names(pops_mom)<-NULL
+names(pops_child)<-NULL
+
+fwrite(pops_mom, "/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/Final_Mom_ID.txt", sep="\t" )
+
+fwrite(pops_child, "/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/Final_Child_ID.txt", sep="\t" )
+
+#Removing preeclamptic cases, n = 6708
+
+noPE<-dplyr::filter(covar_link, pn_petACOG13 == 0)
+
+pops_mom2<-dplyr::filter(pops_mom_covar, pn_petACOG13 == 0)[,c("FID","IID")]
+pops_child2<-dplyr::filter(pops_child_covar, pn_petACOG13 == 0)[,c("FID","IID")]
+
+#Check2<-as.data.frame(table(noPE$POPSID))
+
+#Among no PE cases, 2999 mother-child pairs
+
+names(pops_mom2)<-NULL
+names(pops_child2)<-NULL
+
+fwrite(pops_mom2, "/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/Final_Mom_ID_noPE.txt", sep="\t" )
+
+fwrite(pops_child2, "/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/Final_Child_ID_noPE.txt", sep="\t" )
+
+#Check frequencies
+
+#pops_updateuq2<-dplyr::filter(pops_update_uq,POPSID!=326 & POPSID!=2990)
+
+addtl_covars<-c("mat_race_ethnicity","SNPSEX","an_est_age","an_scan1_bmi","an_agefte","ast_IMD2007score","an_married","an_smoker","an_alcohol_bin","pn_petACOG13")
+
+pops_freq<-dplyr::filter(pops_updateuq2,POPSID!=326 & POPSID!=2990)
+pops_freq1<-dplyr::filter(pops_updateuq2,POPSID!=326 & POPSID!=2990 & pn_petACOG13 == 0)
+table(pops_freq$mat_race_ethnicity,exclude=F)
+
+#pops_update2_noPE
+#mum<-dplyr::filter(pops_update2_noPE, status == "mother"), 3450
+#summary(mum$log10sFlt_1_MoM_adjGAwtst1Z) #NA = 102
+#summary(mum$log10sFlt_1_MoM_adjGAwtst2Z) #NA = 65
+#summary(mum$log10sFlt_1_MoM_adjGAwtst3Z) #NA = 138
+#summary(mum$log10sFlt_1_MoM_adjGAwtst4Z) #NA = 294
+
+#child<-dplyr::filter(pops_update2_noPE, status == "child"), 3258
+#summary(child$log10sFlt_1_MoM_adjGAwtst1Z) #NA = 97
+#summary(child$log10sFlt_1_MoM_adjGAwtst2Z) #NA = 122
+#summary(child$log10sFlt_1_MoM_adjGAwtst3Z) #NA = 124
+#summary(child$log10sFlt_1_MoM_adjGAwtst4Z) #NA = 262
+
+CreateTableOne(addtl_covars, data=pops_freq,factorVars=c("mat_race_ethnicity", "SNPSEX","an_married","an_smoker", "an_alcohol_bin","pn_petACOG13"), includeNA = T)
+
+summary(pops_freq$ast_IMD2007score)
+summary(pops_freq1$ast_IMD2007score)
+
+
+
+```

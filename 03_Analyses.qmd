@@ -1,0 +1,556 @@
+---
+title: "Post-GWAS QC and Analyses"
+format: html
+editor: visual
+jupyter: python3
+
+
+#Cambridge HPC
+
+#RUNNING JOBS INTERACTIVELY
+
+#sintr -A GSMITH-SL2-CPU -p cclake -N2 -n64 -t 1:00:00 
+#~/miniconda3/envs/R/bin/R
+---
+
+## PLINK Genetic Association Analyses
+
+```{bash}
+
+#PHENO_PLINK_mom.txt
+#PHENO_PLINK_child.txt
+
+#COVAR_PLINK_mom_GBR.txt
+#COVAR_PLINK_child_GBR.txt
+
+#COVAR_PLINK_mom_GBR_noPE.txt
+#COVAR_PLINK_child_GBR_noPE.txt
+
+#status
+#Final_Mom_ID.txt 
+#Final_Mom_ID_noPE.txt 
+#Final_Child_ID.txt 
+#Final_Child_ID_noPE.txt 
+
+1=COVAR_PLINK_mom_GBR.txt
+2=PHENO_PLINK_mom.txt
+3=Final_Mom_ID.txt 
+4=Mom_GBR_Full
+
+#covar_list=/rds/project/rds-DC0Q0rbedlk/Phenotype_Files/COVAR_PLINK_mom_GBR.txt
+covar_list=/rds/project/rds-DC0Q0rbedlk/Phenotype_Files/COVAR_PLINK_mom_GBR_noPE.txt
+
+#covar_list=/rds/project/rds-DC0Q0rbedlk/Phenotype_Files/COVAR_PLINK_child_GBR.txt
+#covar_list=/rds/project/rds-DC0Q0rbedlk/Phenotype_Files/COVAR_PLINK_child_GBR_noPE.txt
+
+pheno=/rds/project/rds-DC0Q0rbedlk/Phenotype_Files/PHENO_PLINK_mom.txt
+#pheno=/rds/project/rds-DC0Q0rbedlk/Phenotype_Files/PHENO_PLINK_child.txt
+
+#covar=an_est_age,sex_update,pn_petACOG13
+covar=an_est_age,sex_update
+
+#status=/home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/Final_Mom_ID.txt 
+status=/home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/Final_Mom_ID_noPE.txt 
+
+#status=/home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/Final_Child_ID.txt 
+#status=/home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/Final_Child_ID_noPE.txt 
+#output=Mom_GBR_Full
+output=Mom_GBR_noPE
+
+#output=Child_GBR_Full
+#output=Child_GBR_noPE
+
+/home/jam248/rds/hpc-work/plink2 --pfile /rds/project/rds-DC0Q0rbedlk/POPs_Imputation/Merged/POPs_Imputed_7171_1  --ci 0.95 --maf 0.01 --keep ${status} --chr 6 --from-bp 43957093 --to-bp 43957093 --glm hide-covar omit-ref no-x-sex cols=chrom,pos,ref,alt,a1freq,a1count,totallele,test,nobs,beta,orbeta,se,ci,tz,p,err --covar ${covar_list}  --covar-name V1-V10,${covar} --require-covar  --pheno ${pheno}  --pheno-name log10sFlt_1_MoM_adjGAwtst1Z,log10sFlt_1_MoM_adjGAwtst2Z,log10sFlt_1_MoM_adjGAwtst3Z,log10sFlt_1_MoM_adjGAwtst4Z,log10sFlt_1_MoM_adjGAwtst_36_28_diff --out /rds/project/rds-DC0Q0rbedlk/Analyses/GWAS/GBR_nuMoM2b/${output} --no-input-missing-phenotype --threads 30 --covar-variance-standardize V1 V2 V3 V4 V5 V6 V7 V8 V9 V10 an_est_age
+
+awk 'BEGIN {OFS="\t"} FNR == 1 && NR == 1 { print "Filename", $0 } FNR > 1 { print FILENAME, $0 }' *.linear > GBR_NuMom_merged.txt
+```
+
+## PLINK Files - GWAS Summary Statistics
+
+```{r}
+setwd("/home/jam248/rds/rds-obsgynae-pops-DC0Q0rbedlk/Analyses/GWAS/")
+
+
+setwd("/home/jam248/rds/rds-obsgynae-pops-DC0Q0rbedlk/Analyses/GWAS/")
+
+gwasResults1<-fread("Child/sFLT1/Week_12/sFlt1_Child_noPE_12week_full_adjusted-HomT.log10sFlt_1_MoM_adjGAwtst1Z.glm.linear")
+gwasResults2<-fread("Child/sFLT1/Week_20/sFlt1_Child_noPE_20week_full_adjusted-HomT.log10sFlt_1_MoM_adjGAwtst2Z.glm.linear")
+
+gwasResults3<-fread("Child/sFLT1/Week_28/sFlt1_Child_noPE_28week_full_adjusted-HomT.log10sFlt_1_MoM_adjGAwtst3Z.glm.linear")
+
+gwasResults4<-fread("Child/sFLT1/Week_36/sFlt1_Child_noPE_36week_full_adjusted-HomT.log10sFlt_1_MoM_adjGAwtst4Z.glm.linear")
+
+gwasResults5<-fread("Child/sFLT1/Longitudinal/sFlt1_Child_noPE_36_28_diff_full_adjusted-HomT.log10sFlt_1_MoM_adjGAwtst_36_28_diff.glm.linear")
+
+outcome<-"sFLT1"
+
+gwasResults1$Outcome<-paste0(outcome,"_Child_noPE_12week_full")
+gwasResults2$Outcome<-paste0(outcome,"_Child_noPE_20week_full")
+gwasResults3$Outcome<-paste0(outcome,"_Child_noPE_28week_full")
+gwasResults4$Outcome<-paste0(outcome,"_Child_noPE_36week_full")
+gwasResults5$Outcome<-paste0(outcome,"_Child_noPE_36_28_diff_full")
+
+#
+
+
+
+
+
+gwasResults1<-dplyr::filter(gwasResults1,`#CHROM`==13 & (POS==28564148 | POS==28564361 | POS==28564472 | POS==28653382))
+
+
+##FOR ASSOCIATION IN NUMOM2B
+gwasResults1<-dplyr::filter(gwasResults1,(`#CHROM`==6 & POS==43957093)) 
+
+
+gwasResults_combined<-rbind(gwasResults1,
+                            gwasResults2,
+                            gwasResults3,
+                            gwasResults4,
+                            gwasResults5,
+                            gwasResults6,
+                            gwasResults7,
+                            gwasResults8,
+                            gwasResults9,
+                            gwasResults10)
+,
+
+fwrite(gwasResults_combined,"SigGWAS_ALLoutcome.txt",sep="\t")
+
+fwrite(gwasResults_combined,"nuMOM2b_variant_confirm_Chr6_sFLT1outcome.txt",sep="\t")
+
+##FLIP ONE CHR13 VARIANT TO BE CONSISTENT...
+combined<-gwasResults_combined[,c("Outcome","#CHROM","POS","REF","ALT","A1_FREQ","OBS_CT","BETA","SE","L95","U95","P")]
+
+combined$SNP[combined$POS==28564148] = "rs7318880"
+combined$SNP[combined$POS==28564361] ="rs4769612"
+combined$SNP[combined$POS==28564472] = "rs4769613"
+combined$SNP[combined$POS==28653382] ="rs12050029"
+
+combined$ALT[combined$POS==28564361] = "C"
+combined$ALT[combined$POS==28564472] = "C"
+
+combined$REF[combined$POS==28564361] = "T"
+combined$REF[combined$POS==28564472] = "T"
+
+combined$A1_FREQ<-ifelse(combined$POS==28564361 | combined$POS==28564472, 1 - combined$A1_FREQ, combined$A1_FREQ )
+
+combined$BETA<-ifelse(combined$POS==28564361 | combined$POS==28564472, combined$BETA * -1, combined$BETA )
+
+combined$L95_1<-ifelse(combined$POS==28564361 | combined$POS==28564472, combined$U95 * -1, combined$L95 )
+
+combined$U95_1<-ifelse(combined$POS==28564361 | combined$POS==28564472, combined$L95 * -1, combined$U95 )
+
+combined<-gwasResults_combined[,c("Outcome","#CHROM","POS","REF","ALT","A1_FREQ","OBS_CT","BETA","SE","L95","U95","P")]
+
+combined$SNP[combined$POS==28564148] = "rs7318880"
+combined$SNP[combined$POS==28564361] ="rs4769612"
+combined$SNP[combined$POS==28564472] = "rs4769613"
+combined$SNP[combined$POS==28653382] ="rs12050029"
+
+combined$ALT[combined$POS==28564361] = "C"
+combined$ALT[combined$POS==28564472] = "C"
+
+combined$REF[combined$POS==28564361] = "T"
+combined$REF[combined$POS==28564472] = "T"
+
+combined$A1_FREQ<-ifelse(combined$POS==28564361 | combined$POS==28564472, 1 - combined$A1_FREQ, combined$A1_FREQ )
+
+combined$BETA<-ifelse(combined$POS==28564361 | combined$POS==28564472, combined$BETA * -1, combined$BETA )
+
+combined$L95_1<-ifelse(combined$POS==28564361 | combined$POS==28564472, combined$U95 * -1, combined$L95 )
+
+combined$U95_1<-ifelse(combined$POS==28564361 | combined$POS==28564472, combined$L95 * -1, combined$U95 )
+
+fwrite(combined,"4PEVar.txt",sep="\t")
+
+
+##
+```
+
+## Application of genetic scores
+
+```{r}
+#For the command line
+#R
+
+#Following this tutorial: https://choishingwan.github.io/PRS-Tutorial
+library(dplyr)
+library(bigsnpr)
+library(data.table)
+library(purrr)
+library(tidyr)
+
+runPLINK<- function(PLINKoptions = "") system(paste("/home/jam248/miniconda3/bin/plink2", PLINKoptions))
+
+runPLINK("--bfile /home/jam248/rds/rds-obsgynae-pops-DC0Q0rbedlk/POPs_Imputation/Mack/Mom_Imputed --keep /home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/Final_Mom_ID_noPE.txt --maf 0.001 --make-bed --out /home/jam248/rds/rds-obsgynae-pops-DC0Q0rbedlk/Analyses/PGS/Input/Mom_noPE_PGS")
+
+runPLINK("--bfile /home/jam248/rds/rds-obsgynae-pops-DC0Q0rbedlk/POPs_Imputation/Mack/Child_Imputed --keep /home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/Final_Child_ID_noPE.txt --maf 0.001 --make-bed --out /home/jam248/rds/rds-obsgynae-pops-DC0Q0rbedlk/Analyses/PGS/Input/Child_noPE_PGS")
+
+setwd("/home/jam248/rds/rds-obsgynae-pops-DC0Q0rbedlk/Analyses/PGS/Input/")
+
+
+
+```
+
+For reproducibility, we use pgsc_calc
+
+```{r}
+#Prepare samplesheet file
+samplesheet<-fread("home/jam248/rds/rds-obsgynae-pops-DC0Q0rbedlk/POPs_Imputation/Mack/PGS/samplesheet.csv")
+
+#Using a 0.01 MAF filtered PLINK fileset to match with PGS
+# #Honigberg Preeclampsia PGS
+
+system("nextflow run /rds/project/rds-DC0Q0rbedlk/Analyses/PGS/pgsc_calc/pgsc_calc/main.nf -c /rds/project/rds-DC0Q0rbedlk/Analyses/PGS/pgsc_calc/pgsc_calc/mount.config \
+-w /rds/project/rds-DC0Q0rbedlk/Analyses/PGS/pgsc_calc/Mack \
+--input /rds/project/rds-DC0Q0rbedlk/POPs_Imputation/Mack/PGS/samplesheet_maternal.csv \
+--run_ancestry /rds/project/rds-DC0Q0rbedlk/Analyses/PGS/pgsc_calc/pgsc_HGDP+1kGP_v1.tar \
+--pgs_id PGS003586 \
+--target_build GRCh38 --keep_multiallelic false \
+--outdir /rds/project/rds-DC0Q0rbedlk/POPs_Imputation/Mack/PGS/Ancestry")
+
+```
+
+```{r}
+#ADD IN PGSC_CALC SCORES
+setwd("/home/jam248/rds/rds-obsgynae-pops-DC0Q0rbedlk/Analyses/PGS/Output/")
+
+Mom_PGS<-fread("Mom_PGS_Dataset.txt")
+Mom_PGS_GBR<-fread("Mom_PGS_GBR_Dataset.txt")
+Mom_PGS_noPE<-fread("Mom_PGS_noPE_Dataset.txt")
+Mom_PGS_GBR_noPE<-fread("Mom_PGS_noPE_GBR_Dataset.txt")
+
+Child_PGS<-fread("Child_PGS_Dataset.txt")
+Child_PGS_GBR<-fread("Child_PGS_GBR_Dataset.txt")
+Child_PGS_noPE<-fread("Child_PGS_noPE_Dataset.txt")
+Child_PGS_GBR_noPE<-fread("Child_PGS_noPE_GBR_Dataset.txt")
+
+pgsc_mom<-fread("/rds/project/rds-DC0Q0rbedlk/POPs_Imputation/Mack/PGS/PGSPOPsMaternal/score/aggregated_scores.txt.gz")
+
+pgsc_child<-fread("/rds/project/rds-DC0Q0rbedlk/POPs_Imputation/Mack/PGS/PGSPOPsFetal/score/aggregated_scores.txt.gz")
+
+pgsc_mom$SUM_z<-scale(pgsc_mom$SUM)
+pgsc_child$SUM_z<-scale(pgsc_child$SUM)
+
+pgsc_mom_all<-merge(pgsc_mom,Mom_PGS,by="IID")
+pgsc_child_all<-merge(pgsc_child,Child_PGS,by="IID")
+
+pgsc_mom_nope<-merge(pgsc_mom,Mom_PGS_noPE,by="IID")
+pgsc_child_nope<-merge(pgsc_child,Child_PGS_noPE,by="IID")
+
+pgsc_mom_all_gbr<-merge(pgsc_mom,Mom_PGS_GBR,by="IID")
+pgsc_child_all_gbr<-merge(pgsc_child,Child_PGS_GBR,by="IID")
+
+pgsc_mom_nope_gbr<-merge(pgsc_mom,Mom_PGS_GBR_noPE,by="IID")
+pgsc_child_nope_gbr<-merge(pgsc_child,Child_PGS_GBR_noPE,by="IID")
+```
+
+```{r}
+#Adding in genetic ancestry adjusted scorefiles
+#USE Z_norm2
+setwd("/rds/project/rds-DC0Q0rbedlk/POPs_Imputation/Mack/PGS/Ancestry/")
+
+Maternal<-fread("PGSPOPsMaternal/score/PGSPOPsMaternal_pgs.txt.gz")
+Maternal<-dplyr::filter(Maternal,sampleset == "PGSPOPsMaternal")
+fwrite(Maternal,"PGS_PE_Maternal_Anc.txt.gz")
+
+Fetal<-fread("PGSPOPsFetal/score/PGSPOPsFetal_pgs.txt.gz")
+Fetal<-dplyr::filter(Fetal,sampleset == "PGSPOPsFetal")
+fwrite(Fetal,"PGS_PE_Fetal_Anc.txt.gz")
+```
+
+```{r}
+
+setwd("/rds/project/rds-DC0Q0rbedlk/POPs_Imputation/Mack/PGS/Ancestry/")
+Fetal_Anc<-fread("PGS_PE_Fetal_Anc.txt.gz")[,c("IID","Z_norm2")]
+Maternal_Anc<-fread("PGS_PE_Maternal_Anc.txt.gz")[,c("IID","Z_norm2")]
+
+Fetal_Anc<-dplyr::rename(Fetal_Anc,PE_Znorm2=Z_norm2)
+Maternal_Anc<-dplyr::rename(Maternal_Anc,PE_Znorm2=Z_norm2)
+
+setwd("/home/jam248/rds/rds-obsgynae-pops-DC0Q0rbedlk/Analyses/PGS/Output/")
+#setwd("/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs/Results/")
+
+
+
+Mom_PGS<-fread("Mom_PGS_Dataset.txt")
+Mom_PGS_GBR<-fread("Mom_PGS_GBR_Dataset.txt")
+Mom_PGS_noPE<-fread("Mom_PGS_noPE_Dataset.txt")
+Mom_PGS_GBR_noPE<-fread("Mom_PGS_noPE_GBR_Dataset.txt")
+
+Child_PGS<-fread("Child_PGS_Dataset.txt")
+Child_PGS_GBR<-fread("Child_PGS_GBR_Dataset.txt")
+Child_PGS_noPE<-fread("Child_PGS_noPE_Dataset.txt")
+Child_PGS_GBR_noPE<-fread("Child_PGS_noPE_GBR_Dataset.txt")
+
+Mom_PGS<-merge(Mom_PGS,Maternal_Anc,by="IID",all.x=T)
+Mom_PGS_GBR<-merge(Mom_PGS_GBR,Maternal_Anc,by="IID",all.x=T)
+Mom_PGS_noPE<-merge(Mom_PGS_noPE,Maternal_Anc,by="IID",all.x=T)
+Mom_PGS_GBR_noPE<-merge(Mom_PGS_GBR_noPE,Maternal_Anc,by="IID",all.x=T)
+
+Child_PGS<-merge(Child_PGS,Fetal_Anc,by="IID",all.x=T)
+Child_PGS_GBR<-merge(Child_PGS_GBR,Fetal_Anc,by="IID",all.x=T)
+Child_PGS_noPE<-merge(Child_PGS_noPE,Fetal_Anc,by="IID",all.x=T)
+Child_PGS_GBR_noPE<-merge(Child_PGS_GBR_noPE,Fetal_Anc,by="IID",all.x=T)
+```
+
+```{r}
+
+Mom_PGS<-fread("Mom_PGS_Dataset.txt")
+Mom_PGS_GBR<-fread("Mom_PGS_GBR_Dataset.txt")
+Mom_PGS_noPE<-fread("Mom_PGS_noPE_Dataset.txt")
+Mom_PGS_GBR_noPE<-fread("Mom_PGS_noPE_GBR_Dataset.txt")
+
+Child_PGS<-fread("Child_PGS_Dataset.txt")
+Child_PGS_GBR<-fread("Child_PGS_GBR_Dataset.txt")
+Child_PGS_noPE<-fread("Child_PGS_noPE_Dataset.txt")
+Child_PGS_GBR_noPE<-fread("Child_PGS_noPE_GBR_Dataset.txt")
+
+setwd("/home/jam248/rds/rds-obsgynae-pops-DC0Q0rbedlk/Analyses/PGS/Output/")
+
+fwrite(Mom_PGS,"Mom_PGS_Dataset.txt",sep="\t")
+fwrite(Mom_PGS_GBR,"Mom_PGS_GBR_Dataset.txt",sep="\t")
+fwrite(Mom_PGS_noPE,"Mom_PGS_noPE_Dataset.txt",sep="\t")
+fwrite(Mom_PGS_GBR_noPE,"Mom_PGS_noPE_GBR_Dataset.txt",sep="\t")
+
+fwrite(Child_PGS,"Child_PGS_Dataset.txt",sep="\t")
+fwrite(Child_PGS_GBR,"Child_PGS_GBR_Dataset.txt",sep="\t")
+fwrite(Child_PGS_noPE,"Child_PGS_noPE_Dataset.txt",sep="\t")
+fwrite(Child_PGS_GBR_noPE,"Child_PGS_noPE_GBR_Dataset.txt",sep="\t")
+
+```
+
+Calculating percentiles
+
+```{r}
+
+#pgsc_mom
+#pgsc_child
+
+#pgsc_mom_all
+#pgsc_child_all
+
+Add_Percent<-function(data){
+  #data = mutate(data, FLT1_percentile = ntile(data$FLT1_SUM,100))
+  #data = mutate(data, PE_percentile = ntile(data$PE_SUM,100))
+  data = mutate(data, PE_percentile = ntile(data$PE_Znorm2,100))
+  data = mutate(data, PE_top10 = case_when(
+                      PE_percentile >= 90 ~ 1,
+                      TRUE ~ 0
+  ))
+  
+  return(data)
+}
+
+Mom_PGS<-Add_Percent(Mom_PGS)
+Mom_PGS_GBR<-Add_Percent(Mom_PGS_GBR)
+Mom_PGS_noPE<-Add_Percent(Mom_PGS_noPE)
+Mom_PGS_GBR_noPE<-Add_Percent(Mom_PGS_GBR_noPE)
+
+Child_PGS<-Add_Percent(Child_PGS)
+Child_PGS_GBR<-Add_Percent(Child_PGS_GBR)
+Child_PGS_noPE<-Add_Percent(Child_PGS_noPE)
+Child_PGS_GBR_noPE<-Add_Percent(Child_PGS_GBR_noPE)
+
+fwrite(Mom_PGS,"Mom_PGS_Dataset.txt",sep="\t")
+fwrite(Mom_PGS_GBR,"Mom_PGS_GBR_Dataset.txt",sep="\t")
+fwrite(Mom_PGS_noPE,"Mom_PGS_noPE_Dataset.txt",sep="\t")
+fwrite(Mom_PGS_GBR_noPE,"Mom_PGS_noPE_GBR_Dataset.txt",sep="\t")
+
+fwrite(Child_PGS,"Child_PGS_Dataset.txt",sep="\t")
+fwrite(Child_PGS_GBR,"Child_PGS_GBR_Dataset.txt",sep="\t")
+fwrite(Child_PGS_noPE,"Child_PGS_noPE_Dataset.txt",sep="\t")
+fwrite(Child_PGS_GBR_noPE,"Child_PGS_noPE_GBR_Dataset.txt",sep="\t")
+
+
+```
+
+```{r}
+
+library(broom)
+
+
+Mom_PGS1<-fread("Mom_PGS_Dataset.txt")
+Mom_PGS_GBR1<-fread("Mom_PGS_GBR_Dataset.txt")
+Mom_PGS_noPE1<-fread("Mom_PGS_noPE_Dataset.txt")
+Mom_PGS_GBR_noPE1<-fread("Mom_PGS_noPE_GBR_Dataset.txt")
+
+Child_PGS1<-fread("Child_PGS_Dataset.txt")
+Child_PGS_GBR1<-fread("Child_PGS_GBR_Dataset.txt")
+Child_PGS_noPE1<-fread("Child_PGS_noPE_Dataset.txt")
+Child_PGS_GBR_noPE1<-fread("Child_PGS_noPE_GBR_Dataset.txt")
+
+#PRS Analysis - sFLT1 as outcome
+
+#Covariates: an_est_age,mat_race_ethnicity,sex_update,an_smoker,pn_petACOG13
+
+#Unadjusted: PGS only
+#Unadjusted 2: PGS and PCs
+#Adjusted: PGS, PCs, and phenotype-specific covariates
+#log10sFlt_1_MoM_adjGAwtst1Z
+#log10sFlt_1_MoM_adjGAwtst2Z
+#log10sFlt_1_MoM_adjGAwtst3Z
+#log10sFlt_1_MoM_adjGAwtst4Z
+#log10sFlt_1_MoM_adjGAwtst_36_28_diff
+
+#Mom_PGS
+#Mom_PGS_GBR
+#Mom_PGS_noPE
+#Mom_PGS_GBR_noPE
+#Child_PGS
+#Child_PGS_GBR
+#Child_PGS_noPE
+#Child_PGS_GBR_noPE
+
+#Beta per SD, p-value --> PGS
+#2 variant allele score - imputed dosages bounded by 0 to 4
+#Minimal covariate set
+
+#For sFLT, PE_SUM, GE_SUM, FLT1_SUM, PE2_SUM
+
+outcome<-c("log10sFlt_1_MoM_adjGAwtst1Z","log10sFlt_1_MoM_adjGAwtst2Z","log10sFlt_1_MoM_adjGAwtst3Z","log10sFlt_1_MoM_adjGAwtst4Z","log10sFlt_1_MoM_adjGAwtst_36_28_diff")
+
+outcome<-c("log10PlGF_MoM_adjGAwtst1Z","log10PlGF_MoM_adjGAwtst2Z","log10PlGF_MoM_adjGAwtst3Z","log10PlGF_MoM_adjGAwtst4Z","log10PlGF_MoM_adjGAwtst_36_28_diff")
+
+outcome<-c("log10sFlt_1_PlGF1Z","log10sFlt_1_PlGF2Z","log10sFlt_1_PlGF3Z","log10sFlt_1_PlGF4Z","log10sFlt_1_PlGF_36_28_diff")
+
+data<-c("Child_PGS_noPE","Child_PGS", "Child_PGS_GBR_noPE","Child_PGS_GBR","Mom_PGS_noPE","Mom_PGS","Mom_PGS_GBR_noPE", "Mom_PGS_GBR",)
+
+data=Mom_PGS_GBR1
+data$log10sFlt_1_PlGF_36_28_diff = data$log10sFlt_1_PlGF4Z - data$log10sFlt_1_PlGF3Z
+
+#Add for all
+# + pn_petACOG13
+
+#Remove for GBR
+# mat_race_ethnicity +
+
+#PE_Znorm2
+#PE_top10
+
+Beta_list<-lapply(outcome, function(x){
+  tidy(lm(substitute(i ~ PE_top10 + an_est_age + sex_update + pn_petACOG13 + V1 + V2 + V3 + V4 + V5 + V6 + V7 + V8 + V9 + V10, list(i = as.name(x))), data=data), conf.int = TRUE)
+  })
+
+Names<-lapply(Beta_list, `[`,2,1)
+Names<-do.call(rbind,Names)
+
+Betas<-lapply(Beta_list, `[`, 2,2)
+Betas<-do.call(rbind,Betas)
+
+LCIs<-lapply(Beta_list, `[`, 2,6)
+LCIs<-do.call(rbind,LCIs)
+
+UCIs<-lapply(Beta_list, `[`, 2,7)
+UCIs<-do.call(rbind,UCIs)
+
+Probs<-lapply(Beta_list, `[`,2,5)
+Probs<-do.call(rbind,Probs)
+
+R_2<-lapply(outcome, function(x){
+  glance(lm(substitute(i ~ PE_top10, list(i = as.name(x))), data=data))
+})
+ 
+R_square<-lapply(R_2, `[`,1,1)
+R_square<-do.call(rbind,R_square)
+
+Nobs<-lapply(R_2, `[`,1,12)
+Nobs<-do.call(rbind,Nobs)
+
+Est<-cbind(outcome,Names,Nobs,Betas,LCIs,UCIs,Probs,R_square)
+
+
+#Est$Type<-"Multi-Fetal-noPE"
+Est_noPE_multi<-Est
+#Est$Type<-"Multi-Fetal-PE"
+Est_Full_multi<-Est
+#Est$Type<-"GBR-Fetal-noPE"
+Est_noPE_GBR<-Est
+#Est$Type<-"GBR-Fetal-PE"
+Est_Full_GBR<-Est
+
+#Est$Type<-"Multi-Maternal-noPE"
+Est_noPE_multi<-Est
+#Est$Type<-"Multi-Maternal-PE"
+Est_Full_multi<-Est
+#Est$Type<-"GBR-Maternal-noPE"
+Est_noPE_GBR<-Est
+#Est$Type<-"GBR-Maternal-PE"
+Est_Full_GBR<-Est
+
+
+Est<-rbind(Est_noPE_multi,Est_Full_multi,Est_noPE_GBR,Est_Full_GBR)
+
+
+fwrite(Est, "/home/jam248/rds/rds-obsgynae-pops-DC0Q0rbedlk/Analyses/PGS/Output/PGS_PE_Output-Maternal_ancadj-ratio_PGSstrat.txt",sep="\t")
+
+fwrite(Est, "/home/jam248/rds/rds-obsgynae-pops-DC0Q0rbedlk/Analyses/PGS/Output/PGS_PE_Output-Fetal_ancadj-ratio_PGSstrat.txt",sep="\t")
+
+```
+
+## Demographic Characteristics
+
+```{r}
+library(tableone)
+
+mom_covar<-fread("/home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/COVAR_PLINK_mom_Full.txt")
+
+child_covar<-fread("/home/jam248/rds/hpc-work/POPs/Genotype_Data/GWAS/Input/COVAR_PLINK_child_Full.txt")
+
+Mom_PGS1<-mom_covar[mom_covar$IID %in% Mom_PGS$IID]
+Mom_PGS_noPE1<-mom_covar[mom_covar$IID %in% Mom_PGS_noPE$IID]
+
+Mom_PGS_GBR1<-mom_covar[mom_covar$IID %in% Mom_PGS_GBR$IID]
+Mom_PGS_GBR_noPE1<-mom_covar[mom_covar$IID %in% Mom_PGS_GBR_noPE$IID]
+#Mom_PGS
+#Mom_PGS_GBR
+#Mom_PGS_noPE
+#Mom_PGS_GBR_noPE
+Child_PGS1<-child_covar[child_covar$IID %in% Child_PGS$IID]
+Child_PGS_noPE1<-child_covar[child_covar$IID %in% Child_PGS_noPE$IID]
+
+Child_PGS_GBR1<-child_covar[child_covar$IID %in% Child_PGS_GBR$IID]
+Child_PGS_GBR_noPE1<-child_covar[child_covar$IID %in% Child_PGS_GBR_noPE$IID]
+#Child_PGS
+#Child_PGS_GBR
+#Child_PGS_noPE
+#Child_PGS_GBR_noPE
+
+addtl_covars<-c("mat_race_ethnicity","sex_update","an_est_age","an_scan1_bmi","an_agefte","ast_IMD2007score","an_smoker","an_alcohol_bin","pn_petACOG13")
+
+CreateTableOne(addtl_covars, data=Mom_PGS1,factorVars=c("mat_race_ethnicity", "sex_update","an_smoker", "an_alcohol_bin","pn_petACOG13"), includeNA = T)
+
+
+
+```
+
+#### Additional Demo variables
+
+```{r}
+
+#library(readxl)
+setwd("/Users/mackja/Library/CloudStorage/OneDrive-UniversityofCambridge/POPs")
+
+pops<-read_excel("POPS_phenotype_data_extract_JM_Samplenumbers_2022.xlsx")
+pops_extra<-read_excel("Phenotypes/POPSID_phenotypes_JM_6dec2023.xlsx")
+
+pops<-merge(pops,pops_extra,by="POPSID")
+
+Child_IDs<-fread("Final_Child_ID.txt")
+Mom_IDs<-fread("Final_Mom_ID.txt")
+Mom_noPE_IDs<-fread("Final_Mom_ID_noPE.txt")
+Child_noPE_IDs<-fread("Final_Child_ID_noPE.txt")
+
+Mom<-pops[pops$POPSID %in% Mom_IDs$V1,]
+Mom_noPE<-pops[pops$POPSID %in% Mom_noPE_IDs$V1,]
+
+Child<-pops[pops$POPSID %in% Child_IDs$V1,]
+Child_noPE<-pops[pops$POPSID %in% Child_noPE_IDs$V1,]
+
+##Including more clinical information
+
+clinical_var<-c("pn_ga_wk","pnptnnu_outcome","SGAlt10_Br1990","pn_preterm")
+
+CreateTableOne(clinical_var, data=Mom_noPE,factorVars=c("pnptnnu_outcome","SGAlt10_Br1990","pn_preterm"), includeNA = T)
+```
